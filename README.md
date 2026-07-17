@@ -2,18 +2,28 @@
 
 ## Run Project
 
-To start the project, simply run:
+To start the project, execute:
+```bash
+start-dev.bat
+```
 
-http://localhost:5171/scalar
+Alternatively, you can run the project manually:
+```bash
+cd wwwroot
+npx http-server
+```
 
-
----
+To start server from the project root:
+```bash
+dotnet run
+```
 
 ## Create Notification
 
-Use the notification endpoint:
+Use the Scalar API documentation to send a new notification.
 
-http://localhost:5171/notification
+Endpoint:
+POST http://localhost:5171/notification
 
 Example:
 
@@ -25,3 +35,8 @@ Example:
 }
 ```
 > Add user IDs to `targetUserIds` for targeted notifications, or set it to `[]` to publish the notification to all users.
+
+## Receive Notifications
+
+Open the client page to receive real-time notifications:
+http://127.0.0.1:8080/index.html
