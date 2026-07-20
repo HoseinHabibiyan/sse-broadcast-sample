@@ -58,8 +58,14 @@ public class NotificationService(AppDbContext db, NotificationHub hub)
                 n.NotificationDeliveries.All(d => d.UserId != userId))
             .ToListAsync(ct);
     }
+    
+    public async Task AddDelivery(NotificationDelivery delivery, CancellationToken ct)
+    {
+        db.NotificationDeliveries.Add(delivery);
+        await db.SaveChangesAsync(ct);
+    }
 
-    public async Task AddDelivery(List<NotificationDelivery> deliveries, CancellationToken ct)
+    public async Task AddDeliveries(List<NotificationDelivery> deliveries, CancellationToken ct)
     {
         db.NotificationDeliveries.AddRange(deliveries);
         await db.SaveChangesAsync(ct);

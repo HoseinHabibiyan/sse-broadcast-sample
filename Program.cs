@@ -13,8 +13,6 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-builder.Services.AddMemoryCache();
-
 builder.Services.AddSingleton<NotificationHub>();
 builder.Services.AddScoped<NotificationService>();
 
@@ -48,7 +46,7 @@ app.UseHttpsRedirection();
 
 app.MapScalarApiReference();
 
-app.MapGet("/notifications/event/{userId:int}", (
+app.MapGet("/notifications/stream/{userId:int}", (
     int userId,
     NotificationService notificationService,
     NotificationHub hub,
@@ -76,19 +74,19 @@ async IAsyncEnumerable<SseItem<string>> StreamNotifications(int userId,
     }
 
     if (deliveries.Any())
-        await notificationService.AddDelivery(deliveries, ct);
+        await notificationService.AddDeliveries(deliveries, ct);
 
     await foreach (var notification in hub.SubscribeAsync(userId, ct))
     {
         yield return new SseItem<string>(notification.Message);
 
-        await notificationService.AddDelivery([
+        await notificationService.AddDelivery(
             new NotificationDelivery
             {
                 UserId = userId,
                 NotificationId = notification.Id
             }
-        ], ct);
+        , ct);
     }
 }
 

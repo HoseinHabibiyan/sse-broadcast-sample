@@ -20,7 +20,7 @@ public class NotificationHub
             }
             catch (ChannelClosedException)
             {
-               _connections.TryRemove(userId, out _);
+                Disconnect(userId);
             }
         }
     }
@@ -35,7 +35,7 @@ public class NotificationHub
             }
             catch (ChannelClosedException)
             {
-                _connections.TryRemove(connection.Key, out _);
+                Disconnect(connection.Key);
             }
         }
     }
