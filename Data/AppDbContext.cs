@@ -1,7 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using SSEBroadcastSample.Models;
+using SSEBroadcastSample.Models.Entities;
 
-namespace SSEBroadcastSample.Context;
+namespace SSEBroadcastSample.Data;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
