@@ -1,4 +1,4 @@
-namespace SSEBroadcastSample.Models;
+namespace SSEBroadcastSample.Models.Entities;
 
 public class NotificationTarget
 {

@@ -1,14 +1,22 @@
-using System.Collections.Concurrent;
+using System.Net.ServerSentEvents;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
-using SSEBroadcastSample.Context;
-using SSEBroadcastSample.Models;
 using Scalar.AspNetCore;
+using SSEBroadcastSample.Data;
+using SSEBroadcastSample.Models.Entities;
+using SSEBroadcastSample.Models.Requests;
+using SSEBroadcastSample.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddMemoryCache();
+
+builder.Services.AddSingleton<NotificationHub>();
+builder.Services.AddScoped<NotificationService>();
 
 builder.Services.AddCors(options =>
 {
@@ -20,13 +28,13 @@ builder.Services.AddCors(options =>
     });
 });
 
-using (var scope = builder.Services.BuildServiceProvider().CreateScope())
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-
-var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
@@ -40,97 +48,61 @@ app.UseHttpsRedirection();
 
 app.MapScalarApiReference();
 
-ConcurrentDictionary<int, StreamWriter> connections = new();
+app.MapGet("/notifications/event/{userId:int}", (
+    int userId,
+    NotificationService notificationService,
+    NotificationHub hub,
+    CancellationToken ct) => Results.ServerSentEvents(
+    StreamNotifications(userId, notificationService, hub, ct)));
 
-app.MapPost("/notification", async (AddNotifyRequest request,AppDbContext db,CancellationToken ct) =>
+async IAsyncEnumerable<SseItem<string>> StreamNotifications(int userId,
+    NotificationService notificationService,
+    NotificationHub hub,
+    [EnumeratorCancellation] CancellationToken ct)
 {
-    List<NotificationTarget> targets = new();
-    if (request.TargetUserIds.Any())
+    var pendingNotifications = await notificationService.GetPending(userId, ct);
+
+    List<NotificationDelivery> deliveries = new();
+
+    foreach (var notification in pendingNotifications)
     {
-        targets = request.TargetUserIds.Select(userId => new NotificationTarget
+        yield return new SseItem<string>(notification.Message);
+
+        deliveries.Add(new NotificationDelivery()
         {
-            TargetType = NotificationTargetType.User,
-            TargetId = userId,
-        }).ToList();
-    }
-    else
-    {
-        targets.Add(new NotificationTarget
-        {
-            TargetType = NotificationTargetType.All,
+            UserId = userId,
+            NotificationId = notification.Id
         });
     }
 
-    Notification notification = new()
+    if (deliveries.Any())
+        await notificationService.AddDelivery(deliveries, ct);
+    
+    await foreach (var notification in hub.SubscribeAsync(userId, ct))
     {
-        Message = request.Message,
-        ExpireDate = request.ExpireDate,
-        NotificationTargets = targets
-    };
+        yield return new SseItem<string>(notification.Message);
+        
+        await notificationService.AddDelivery([
+            new NotificationDelivery
+            {
+                UserId = userId,
+                NotificationId = notification.Id
+            }
+        ], ct);
+    }
+}
 
-    db.Notifications.Add(notification);
-    await db.SaveChangesAsync(ct);
+app.MapPost("/notification", async (AddNotificationRequest request, NotificationService notificationService, CancellationToken ct) =>
+{
+    await notificationService.AddNotificationAsync(request, ct);
 
     return Results.Ok();
 });
 
-app.MapGet("/notifications/event/{userId:int}",
-    async (
-        int userId,
-        AppDbContext db,
-        HttpContext context,
-        CancellationToken ct) =>
-    {
-        context.Response.Headers.ContentType = "text/event-stream";
-        context.Response.Headers.CacheControl = "no-cache";
-
-        await context.Response.Body.FlushAsync(ct);
-
-        var writer = new StreamWriter(context.Response.Body);
-
-        connections[userId] = writer;
-        
-        while (!ct.IsCancellationRequested)
-        {
-            var pending = await db.NotificationTargets
-                .Include(x => x.Notification)
-                .ThenInclude(x => x.NotificationDeliveries)
-                .Where(x =>
-                    ((x.TargetType == NotificationTargetType.User && x.TargetId == userId) ||
-                    x.TargetType == NotificationTargetType.All) &&
-                    x.Notification.NotificationDeliveries.All(d => d.UserId != userId)
-                    && x.Notification.ExpireDate > DateTime.UtcNow)
-                .ToListAsync(ct);
-
-            if (pending.Any())
-            {
-                foreach (var item in pending)
-                {
-                    await writer.WriteAsync(
-                        $"data: {item.Notification.Message}\n\n");
-
-                    await writer.FlushAsync();
-
-                    db.NotificationDeliveries.Add(new NotificationDelivery()
-                    {
-                        UserId = userId,
-                        NotificationId = item.NotificationId
-                    });
-                }
-
-                await db.SaveChangesAsync(ct);
-            }
-
-            await Task.Delay(5000, ct);
-        }
-    });
-
-app.MapGet("/users", async (AppDbContext db,CancellationToken ct) =>
+app.MapGet("/users", async (AppDbContext db, CancellationToken ct) =>
 {
     var users = await db.Users.Select(u => new { u.Id, u.UserName }).ToListAsync(ct);
     return Results.Ok(users);
 });
 
 app.Run();
-
-record AddNotifyRequest(string Message, DateTime ExpireDate, int[] TargetUserIds);
